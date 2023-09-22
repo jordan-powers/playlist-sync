@@ -3,6 +3,7 @@ import plistlib
 import json
 import functools
 from urllib.parse import unquote
+import html
 
 settings_path = Path(__file__).parent / 'settings.json'
 with settings_path.open("r") as inf:
@@ -105,18 +106,18 @@ for plist in parsed_playlists:
     for track in plist.tracks:
         total_duration += track.duration
         zpl_items.append(zpl_item_template.format(
-            src=str(track.location),
-            album_title=track.album_name,
-            album_artist=track.album_artist,
-            track_title=track.track_name,
-            track_artist=track.track_artist,
+            src=html.escape(str(track.location)),
+            album_title=html.escape(track.album_name),
+            album_artist=html.escape(track.album_artist),
+            track_title=html.escape(track.track_name),
+            track_artist=html.escape(track.track_artist),
             duration=track.duration
         ))
 
     zpl_playlist = zpl_template.format(
         item_count=len(plist.tracks),
         total_duration_ms=total_duration,
-        title=plist.name,
+        title=html.escape(plist.name),
         items='\n'.join(zpl_items)
     )
 
