@@ -43,7 +43,11 @@ class Track:
         location = track['Location']
         assert location.startswith('file://localhost/')
         location = Path(unquote(location[len('file://localhost/'):]))
-        assert location.is_file()
+
+        if not location.is_file():
+            print(track)
+
+        assert location.is_file(), f"File not found: {location}"
 
         return Track(
             track['Name'],
@@ -77,8 +81,12 @@ class Playlist:
 parsed_playlists: 'list[Playlist]' = []
 
 for playlist in itunes_library['Playlists']:
+    print(playlist['Name'])
     if playlist['Name'].lower() in playlist_names:
-        parsed_playlists.append(Playlist.from_itunes(playlist))
+        try:
+            parsed_playlists.append(Playlist.from_itunes(playlist))
+        except AssertionError as e:
+            print(f"Skipping {playlist['Name']} due to {str(e)}")
 
 
 zpl_template = """
