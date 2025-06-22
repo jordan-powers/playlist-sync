@@ -1,9 +1,9 @@
 from pathlib import Path
-import plistlib
 import json
-import functools
-from urllib.parse import unquote
 import html
+
+from playlist import Playlist
+from itunes import iTunesReader
 
 settings_path = Path(__file__).parent / 'settings.json'
 with settings_path.open("r") as inf:
@@ -21,73 +21,12 @@ if not groove_playlist_path.is_dir():
     print("Invalid Groove playlist directory!")
     exit(1)
 
-with itunes_lib_path.open("rb") as inf:
-    itunes_library = plistlib.load(inf, fmt=plistlib.FMT_XML)
-
-class Track:
-    def __init__(self, track_name: str, track_artist: str, album_name: str, album_artist: str, location: Path, duration: int):
-        self.track_name = track_name
-        self.track_artist = track_artist
-        self.album_name = album_name
-        self.album_artist = album_artist
-        self.location = location
-        self.duration = duration
-
-    @staticmethod
-    @functools.cache
-    def from_itunes(id: int) -> 'Track':
-        if str(id) not in itunes_library['Tracks']:
-            raise ValueError(f'Invalid track id {id}')
-
-        track = itunes_library['Tracks'][str(id)]
-        location = track['Location']
-        assert location.startswith('file://localhost/')
-        location = Path(unquote(location[len('file://localhost/'):]))
-
-        if not location.is_file():
-            print(track)
-
-        assert location.is_file(), f"File not found: {location}"
-
-        return Track(
-            track['Name'],
-            track['Artist'],
-            track['Album'],
-            track['Album Artist'],
-            location,
-            track['Total Time']
-        )
-
-    def __str__(self) -> str:
-        return f"{self.album_artist} - {self.album_name} - {self.track_name} - {str(self.location)}"
-
-class Playlist:
-    def __init__(self, name: str, tracks: 'list[Track]'):
-        self.name = name
-        self.tracks = tracks
-
-    @staticmethod
-    def from_itunes(data: dict) -> 'Playlist':
-        tracks = [Track.from_itunes(item['Track ID']) for item in data['Playlist Items']]
-        return Playlist(data['Name'], tracks)
-
-    def __str__(self) -> str:
-        out = f"Playlist - {self.name}:\n"
-        for track in self.tracks:
-            out += '  ' + str(track) + '\n'
-
-        return out
-
 parsed_playlists: 'list[Playlist]' = []
 
-for playlist in itunes_library['Playlists']:
-    print(playlist['Name'])
-    if playlist['Name'].lower() in playlist_names:
-        try:
-            parsed_playlists.append(Playlist.from_itunes(playlist))
-        except AssertionError as e:
-            print(f"Skipping {playlist['Name']} due to {str(e)}")
-
+itunes = iTunesReader(itunes_lib_path)
+for playlist in itunes.read_playlists():
+    if playlist.name.lower() in playlist_names:
+        parsed_playlists.append(playlist)
 
 zpl_template = """
 <?zpl version="2.0"?>

@@ -1,3 +1,4 @@
 itunes-key.txt
 *.musicdb
 *.musicdb.bin
+__pycache__/
