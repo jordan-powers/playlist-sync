@@ -41,6 +41,8 @@ class AppleMusicLibraryDecryptor:
 
         return BytesIO(out_data)
 
+# Made possible by the excellent documentation at https://home.vollink.com/gary/playlister/musicdb.html#lPma
+# And with the iTunes key found at https://gist.github.com/mrexodia/b21b429cdab57fa64e81
 class AppleMusicReader(PlaylistReader):
     def __init__(self, chunks: 'list[Section]'):
         self.chunks = chunks
