@@ -38,6 +38,6 @@ with infile.open("rb") as inf, outfile.open("wb") as outf:
 
     cipher = AES.new(key, AES.MODE_ECB)
     decrypted = cipher.decrypt(inf.read(crypt_size))
-    data = decrypted + inf.read(file_size - crypt_size)
+    data = decrypted + inf.read()
 
     outf.write(zlib.decompress(data))
