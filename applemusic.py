@@ -1,6 +1,6 @@
 from pathlib import Path
 from typing import Generator, BinaryIO
-from playlist import Playlist, Track
+from playlist import Playlist, Track, PlaylistReader
 import struct
 from urllib.parse import unquote
 from Cryptodome.Cipher import AES
@@ -41,7 +41,7 @@ class AppleMusicLibraryDecryptor:
 
         return BytesIO(out_data)
 
-class AppleMusicReader:
+class AppleMusicReader(PlaylistReader):
     def __init__(self, chunks: 'list[Section]'):
         self.chunks = chunks
 

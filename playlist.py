@@ -1,4 +1,6 @@
 from pathlib import Path
+from abc import ABC, abstractmethod
+from typing import Generator
 
 class Track:
     def __init__(self, track_name: str, track_artist: str, album_name: str, album_artist: str, location: Path, duration: int):
@@ -22,3 +24,12 @@ class Playlist:
         for track in self.tracks:
             out += '  ' + str(track) + '\n'
         return out
+
+class PlaylistReader(ABC):
+    @abstractmethod
+    def read_track(self) -> Track:
+        pass
+
+    @abstractmethod
+    def read_playlists(self) -> Generator[Playlist, None, None]:
+        pass
