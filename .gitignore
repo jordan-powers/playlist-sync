@@ -2,3 +2,4 @@ itunes-key.txt
 *.musicdb
 *.musicdb.bin
 __pycache__/
+DEBUG_*.txt
