@@ -3,20 +3,57 @@ from typing import Generator, BinaryIO
 from playlist import Playlist, Track
 import struct
 from urllib.parse import unquote
+from Cryptodome.Cipher import AES
+import zlib
+from io import BytesIO
+
+class AppleMusicLibraryDecryptor:
+    def __init__(self, key: str, library: Path):
+        self.key = key
+        self.library = library
+
+    def decrypt(self, debug=False) -> BinaryIO:
+        with self.library.open("rb") as inf:
+            assert inf.read(4) == bytes('hfma', 'ascii')
+            envelope_length, file_size = struct.unpack('<II', inf.read(8))
+            inf.seek(84)
+            max_crypt_size = struct.unpack('<I', inf.read(4))[0]
+
+            if max_crypt_size < file_size:
+                crypt_size = max_crypt_size
+            else:
+                crypt_size = file_size - envelope_length - ((file_size - envelope_length) % 16)
+
+            if debug:
+                print(f'envelope_length: {envelope_length}')
+                print(f'file_size: {file_size}')
+                print(f'max_crypt_size: {max_crypt_size}')
+                print(f'crypt_size: {crypt_size}')
+
+            inf.seek(0)
+            out_data = inf.read(envelope_length)
+
+            cipher = AES.new(self.key, AES.MODE_ECB)
+            decrypted = cipher.decrypt(inf.read(crypt_size))
+            compressed_data = decrypted + inf.read()
+
+            out_data += zlib.decompress(compressed_data)
+
+        return BytesIO(out_data)
 
 class AppleMusicReader:
     def __init__(self, chunks: 'list[Section]'):
         self.chunks = chunks
 
         self._parse_tracks()
-    
+
     def _parse_tracks(self):
         chunk_iter = iter(self.chunks)
         while True:
             curr = next(chunk_iter)
             if isinstance(curr, HSMA) and curr.subtype == 1:
                 break
-        
+
         ltma = next(chunk_iter)
         assert isinstance(ltma, LTMA)
 
@@ -60,7 +97,7 @@ class AppleMusicReader:
     def read_track(self, id: str) -> Track:
         if id not in self.tracks:
             raise ValueError(f'Unknown id "{id}"')
-    
+
         return self.tracks[id]
 
     def read_playlists(self) -> Generator[Playlist, None, None]:
@@ -84,7 +121,7 @@ class AppleMusicReader:
                 curr = next(chunk_iter)
             except StopIteration:
                 break
-            
+
             if isinstance(curr, HSMA):
                 break
             elif isinstance(curr, LPMA):
@@ -147,10 +184,10 @@ class Section:
         self.offset = offset
         self.section_length = section_length
         self.data = data
-    
+
     def __str__(self):
         return f'Section(signature={self.signature}, offset=0x{self.offset:x}, length=0x{self.section_length:x})'
-    
+
     @staticmethod
     def read_section(signature: str, offset: int, file: BinaryIO) -> 'Section':
         section_length, = struct.unpack('<I', file.read(4))
@@ -166,7 +203,7 @@ class BOMA(Section):
     def read_section(offset: int, file: BinaryIO) -> 'BOMA':
         constant, section_length, subtype = struct.unpack('<III', file.read(12))
         data = file.read(section_length - 16)
-        
+
         if subtype in BOMA_String.STRING_TYPES:
             return BOMA_String.parse_section(offset, section_length, data, subtype)
 
@@ -179,7 +216,7 @@ class BOMA(Section):
                 return BOMA_PlaylistTrack.parse_section(offset, section_length, data)
             case _:
                 return BOMA(offset, section_length, data, subtype)
-    
+
     def __str__(self):
         return f'BOMA(offset=0x{self.offset:x}, length=0x{self.section_length:x}, subtype="{hex(self.subtype)}")'
 
@@ -228,7 +265,7 @@ class BOMA_String(BOMA):
     def __init__(self, offset: int, section_length: int, data: bytes, subtype: int, value: str):
         super().__init__(offset, section_length, data, subtype)
         self.value = value
-    
+
     @staticmethod
     def parse_section(offset: int, section_length: int, data: bytes, subtype: int):
         bytelength,  = struct.unpack('<I', data[8:12])
@@ -243,7 +280,7 @@ class BOMA_PlaylistTrack(BOMA):
     def __init__(self, offset: int, section_length: int, data: bytes, track_id: str):
         super().__init__(offset, section_length, data, 0xCE)
         self.track_id = track_id
-    
+
     @staticmethod
     def parse_section(offset: int, section_length: int, data: bytes):
         assert data[4:8] == 'ipfa'.encode('ascii')
@@ -258,7 +295,7 @@ class BOMA_URI(BOMA):
     def __init__(self, offset: int, section_length: int, data: bytes, uri: str):
         super().__init__(offset, section_length, data, 0x0B)
         self.uri = uri
-    
+
     @staticmethod
     def parse_section(offset: int, section_length: int, data: bytes):
         uri_length, = struct.unpack('<I', data[8:12])
@@ -272,7 +309,7 @@ class BOMA_TrackNumerics(BOMA):
     def __init__(self, offset: int, section_length: int, data: bytes, duration_ms: int):
         super().__init__(offset, section_length, data, 0x01)
         self.duration_ms = duration_ms
-    
+
     @staticmethod
     def parse_section(offset: int, section_length: int, data: bytes):
         duration_ms, = struct.unpack('<I', data[160:164])
@@ -286,7 +323,7 @@ class HSMA(Section):
         super().__init__('hsma', offset, section_length, data)
         self.associated_length = associated_length
         self.subtype = subtype
-    
+
     @staticmethod
     def read_section(offset, file):
         section = Section.read_section('hsma', offset, file)
@@ -308,7 +345,7 @@ class LTMA(Section):
     def __init__(self, offset: int, section_length: int, data: bytes, itma_count: int):
         super().__init__('ltma', offset, section_length, data)
         self.itma_count = itma_count
-    
+
     @staticmethod
     def read_section(offset, file):
         section = Section.read_section('ltma', offset, file)
@@ -323,7 +360,7 @@ class ITMA(Section):
         super().__init__('itma', offset, section_length, data)
         self.track_id = track_id
         self.track_no = track_no
-    
+
     @staticmethod
     def read_section(offset, file):
         section = Section.read_section('itma', offset, file)
@@ -338,7 +375,7 @@ class LPMA_Master(Section):
     def __init__(self, offset: int, section_length: int, data: bytes, lpma_count: int):
         super().__init__('lPma', offset, section_length, data)
         self.lpma_count = lpma_count
-    
+
     @staticmethod
     def read_section(offset, file):
         section = Section.read_section('lPma', offset, file)
@@ -352,7 +389,7 @@ class LPMA(Section):
     def __init__(self, offset: int, section_length: int, data: bytes, track_count: int):
         super().__init__('lpma', offset, section_length, data)
         self.track_count = track_count
-    
+
     @staticmethod
     def read_section(offset, file):
         section = Section.read_section('lpma', offset, file)
@@ -364,16 +401,31 @@ class LPMA(Section):
 
 
 if __name__ == '__main__':
-    infile = Path(__file__).parent / 'Library.musicdb.bin'
+    scriptdir = Path(__file__).parent
+    infile = scriptdir / 'Library.musicdb'
     assert infile.is_file()
 
-    chunks = infile.parent / 'DEBUG_chunks.txt'
-    tracks = infile.parent / 'DEBUG_tracks.txt'
-    playlists = infile.parent / 'DEBUG_playlists.txt'
+    keyfile = scriptdir / 'itunes-key.txt'
+    assert keyfile.exists(), f"Missing keyfile at {keyfile}"
 
-    with infile.open('rb') as inf:
+    decrypted = scriptdir / 'Library.musicdb.bin'
+    if decrypted.is_file():
+        decrypted.unlink()
+
+    chunks = scriptdir / 'DEBUG_chunks.txt'
+    tracks = scriptdir / 'DEBUG_tracks.txt'
+    playlists = scriptdir / 'DEBUG_playlists.txt'
+
+    with keyfile.open('r') as inf:
+        key = inf.read().strip()
+        key = key.encode('ascii')
+
+    with decrypted.open('wb') as outf:
+        outf.write(AppleMusicLibraryDecryptor(key, infile).decrypt(True).read())
+
+    with decrypted.open('rb') as inf:
         reader = AppleMusicReader.load_file(inf)
-    
+
     with chunks.open('w', encoding='utf-8') as outf:
         for chunk in reader.chunks:
             print(chunk, file=outf)
