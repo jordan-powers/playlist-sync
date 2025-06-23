@@ -1,17 +1,26 @@
 from pathlib import Path
-import plistlib
 import json
-import functools
-from urllib.parse import unquote
 import html
+
+from playlist import Playlist, PlaylistReader
+from itunes import iTunesReader
+from applemusic import AppleMusicReader, AppleMusicLibraryDecryptor
 
 settings_path = Path(__file__).parent / 'settings.json'
 with settings_path.open("r") as inf:
     settings = json.load(inf)
 
+keyfile = Path(__file__).parent / 'itunes-key.txt'
+assert keyfile.exists(), f"Missing keyfile at {keyfile}"
+
+applemusic_lib_path = Path(settings['Apple Music Library Path'])
 itunes_lib_path = Path(settings['iTunes Library Path'])
 groove_playlist_path = Path(settings['Groove Playlist Directory'])
-playlist_names = [plist.lower() for plist in settings['Playlists']]
+playlist_names = set(plist.lower() for plist in settings['Playlists'])
+
+if not applemusic_lib_path.is_file():
+    print("Could not find Apple Music library!")
+    exit(1)
 
 if not itunes_lib_path.is_file():
     print("Could not find iTunes library!")
@@ -21,65 +30,23 @@ if not groove_playlist_path.is_dir():
     print("Invalid Groove playlist directory!")
     exit(1)
 
-with itunes_lib_path.open("rb") as inf:
-    itunes_library = plistlib.load(inf, fmt=plistlib.FMT_XML)
-
-class Track:
-    def __init__(self, track_name: str, track_artist: str, album_name: str, album_artist: str, location: Path, duration: int):
-        self.track_name = track_name
-        self.track_artist = track_artist
-        self.album_name = album_name
-        self.album_artist = album_artist
-        self.location = location
-        self.duration = duration
-
-    @staticmethod
-    @functools.cache
-    def from_itunes(id: int) -> 'Track':
-        if str(id) not in itunes_library['Tracks']:
-            raise ValueError(f'Invalid track id {id}')
-
-        track = itunes_library['Tracks'][str(id)]
-        location = track['Location']
-        assert location.startswith('file://localhost/')
-        location = Path(unquote(location[len('file://localhost/'):]))
-        assert location.is_file()
-
-        return Track(
-            track['Name'],
-            track['Artist'],
-            track['Album'],
-            track['Album Artist'],
-            location,
-            track['Total Time']
-        )
-
-    def __str__(self) -> str:
-        return f"{self.album_artist} - {self.album_name} - {self.track_name} - {str(self.location)}"
-
-class Playlist:
-    def __init__(self, name: str, tracks: 'list[Track]'):
-        self.name = name
-        self.tracks = tracks
-
-    @staticmethod
-    def from_itunes(data: dict) -> 'Playlist':
-        tracks = [Track.from_itunes(item['Track ID']) for item in data['Playlist Items']]
-        return Playlist(data['Name'], tracks)
-
-    def __str__(self) -> str:
-        out = f"Playlist - {self.name}:\n"
-        for track in self.tracks:
-            out += '  ' + str(track) + '\n'
-
-        return out
-
 parsed_playlists: 'list[Playlist]' = []
 
-for playlist in itunes_library['Playlists']:
-    if playlist['Name'].lower() in playlist_names:
-        parsed_playlists.append(Playlist.from_itunes(playlist))
+with keyfile.open('r') as inf:
+    key = inf.read().strip()
+    key = key.encode('ascii')
 
+decryptor = AppleMusicLibraryDecryptor(key, applemusic_lib_path)
+applemusic = AppleMusicReader.load_file(decryptor.decrypt())
+itunes = iTunesReader(itunes_lib_path)
+
+readers: 'list[PlaylistReader]' = [applemusic, itunes]
+for reader in readers:
+    for playlist in reader.read_playlists():
+        lname = playlist.name.lower()
+        if lname in playlist_names:
+            playlist_names.remove(lname)
+            parsed_playlists.append(playlist)
 
 zpl_template = """
 <?zpl version="2.0"?>
@@ -124,5 +91,3 @@ for plist in parsed_playlists:
     zpl_out_path = groove_playlist_path / (plist.name + ".zpl")
     with zpl_out_path.open("w") as outf:
         outf.write(zpl_playlist)
-
-
